@@ -1,0 +1,9 @@
+[default.general]
+chip = "ATSAMD51J20A"
+
+[default.rtt]
+enabled = true
+
+up_channels = [
+	{ channel = 0, mode = "NoBlockSkip", format = "String", show_location = false },
+]
