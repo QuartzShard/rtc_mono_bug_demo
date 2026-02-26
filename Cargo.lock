@@ -16,8 +16,6 @@ dependencies = [
 [[package]]
 name = "atsamd-hal"
 version = "0.23.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15ecba6d9da0e33fe34876782b771b0777d2515eab00da77fce41fa8824cfda9"
 dependencies = [
  "aes",
  "atsamd-hal-macros",
@@ -51,8 +49,6 @@ dependencies = [
 [[package]]
 name = "atsamd-hal-macros"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae9d1e473cf24a5deb7966c2e2559e0d739ca7734c0f1b9a058ef31e8188e9f4"
 dependencies = [
  "litrs",
  "phf",
@@ -64,8 +60,6 @@ dependencies = [
 [[package]]
 name = "atsamd51j"
 version = "0.14.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92ab7e107d868d11815375ae1bc3d3370be42c1c7ac984d13bb1ab3037836343"
 dependencies = [
  "cortex-m",
  "cortex-m-rt",
