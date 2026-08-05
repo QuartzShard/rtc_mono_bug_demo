@@ -3,7 +3,9 @@ chip = "ATSAMD51J20A"
 
 [default.rtt]
 enabled = true
+log_enabled = true
+log_path = "./rtt-logs"
 
 up_channels = [
-	{ channel = 0, mode = "NoBlockSkip", format = "String", show_location = false },
+	{ channel = 0, mode = "NoBlockSkip", format = "String", show_location = false, show_timestamps = true },
 ]

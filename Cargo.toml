@@ -10,15 +10,12 @@ cortex-m-rt = "0.7"
 critical-section = "1.2.0"
 panic-halt = "1"
 rtic = { version = "2.2.0", features = ["cortex-m", "thumbv7-backend"] }
+rtic-sync = "1.4"
 rtt-target = "0.6.2"
- 
-# Point at the fork to see bug fix in action
-# [patch.crates-io]
-# atsamd-hal = { path = "../atsamd/hal" }
 
-[features]
-default = []
-workaround = []
+# Point at the fork to see bug fix in action
+[patch.crates-io]
+atsamd-hal = { path = "../atsamd/hal" }
 
 [profile.dev]
 panic = "abort"
