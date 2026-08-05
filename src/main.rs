@@ -106,8 +106,6 @@ const MSG_HZ: u32 = 1_000;
 /// this much pseudo-random offset so the probe phase random-walks instead.
 const MSG_JITTER_CYCLES: u32 = 4_800;
 
-/// Milliseconds since boot, kept by SysTick. Independent of the RTC.
-static SYSTICK_MS: AtomicU32 = AtomicU32::new(0);
 /// Times the priority-3 message ISR has fired.
 static ISR_FIRED: AtomicU32 = AtomicU32::new(0);
 /// Messages dropped because the responder's channel was full (responder frozen).
@@ -126,23 +124,13 @@ static LOST_WAKE_BEATS: AtomicU32 = AtomicU32::new(0);
 static STALLS: AtomicU32 = AtomicU32::new(0);
 /// Worst observed stall, microseconds.
 static WORST_STALL_US: AtomicU32 = AtomicU32::new(0);
-/// Longest responder iteration in the current status window, microseconds.
-/// Makes sub-threshold anomalies visible; reset at each status print.
-static PEAK_ITER_US: AtomicU32 = AtomicU32::new(0);
 
 /// Stands in for the RS485 wire: pends the priority-3 "message received"
 /// interrupt at `MSG_HZ`. Runs above priority 3 so it keeps firing while the
 /// buggy spin blocks priority <= 2.
 #[cortex_m_rt::exception]
 fn SysTick() {
-    static mut DIV: u32 = 0;
     static mut RNG: u32 = 0x1234_5678;
-
-    *DIV += 1;
-    if *DIV >= MSG_HZ / 1_000 {
-        *DIV = 0;
-        SYSTICK_MS.fetch_add(1, Ordering::Relaxed);
-    }
 
     // xorshift32 -> dither the next tick's period by ±MSG_JITTER_CYCLES.
     let mut x = *RNG;
@@ -180,7 +168,7 @@ mod app {
         pin::pin,
         task::Poll,
     };
-    use cortex_m::peripheral::{DWT, scb::SystemHandler, syst::SystClkSource};
+    use cortex_m::peripheral::{scb::SystemHandler, syst::SystClkSource};
     use rtic_sync::{
         channel::{Receiver, Sender},
         make_channel,
@@ -244,14 +232,6 @@ mod app {
         let mut core = ctx.core;
         let mut device = ctx.device;
 
-        // Cycle counter, used only for the boot-time self-check: some
-        // Cortex-M4 implementations gate DWT behind the lock register, so
-        // unlock before enabling. Stall timing runs on SysTick wire ticks
-        // and does not depend on this.
-        core.DCB.enable_trace();
-        cortex_m::peripheral::DWT::unlock();
-        core.DWT.enable_cycle_counter();
-
         // Minimum clock setup: XOSC32K crystal -> RTC monotonic
         let (_bus, _clocks, tokens) = clock_system_at_reset(
             device.oscctrl,
@@ -279,10 +259,8 @@ mod app {
 
         // Measure the COUNT read-sync granularity: the synced copy advances
         // in steps (upstream docs: "typically increments by four"); the max
-        // observed step bounds the refresh quantum that SYNC_SLACK_TICKS must
-        // comfortably exceed. The CYCCNT delta across the same loop is a
-        // self-check that the cycle counter actually runs on this silicon.
-        let cyc0 = DWT::cycle_count();
+        // observed step bounds the refresh quantum that the HAL's sync slack
+        // must comfortably exceed.
         let mut prev = RtcMono::now().ticks();
         let end = prev + 8192; // ~250 ms at 32.768 kHz
         let (mut max_step, mut updates) = (0u64, 0u32);
@@ -325,10 +303,6 @@ mod app {
             max_step,
             updates
         );
-        rprintln!(
-            "CYCCNT over the same window: {} (expect ~12M; 0 = DWT dead)",
-            DWT::cycle_count().wrapping_sub(cyc0)
-        );
         rprintln!();
         rprintln!(
             "control_loop (prio 1): {}ms delay_until loop",
@@ -342,10 +316,11 @@ mod app {
         rprintln!("message_isr  (prio 3): keeps firing during any stall");
         rprintln!();
         rprintln!(
-            "Watch for [STALL] lines: responder frozen ~{}ms while the RTC",
-            CTRL_PERIOD.to_millis()
+            "Watch for [STALL] lines: responder frozen ~{}ms (the timeout",
+            RESP_TIMEOUT.to_millis()
         );
-        rprintln!("handler spins to a re-armed CC0. May take minutes to hit.");
+        rprintln!("deadline in CC0) while the RTC handler spins to a re-armed");
+        rprintln!("compare. Observed onset: seconds; ~8 events/min.");
         rprintln!();
 
         control_loop::spawn().ok();
@@ -435,12 +410,11 @@ mod app {
 
             if iters % 200 == 0 {
                 rprintln!(
-                    "[status] t={}s handled={} stalls={} worst={}us peak={}us dropped={}",
-                    SYSTICK_MS.load(Ordering::Relaxed) / 1_000,
+                    "[status] t={}s handled={} stalls={} worst={}us dropped={}",
+                    ISR_FIRED.load(Ordering::Relaxed) / MSG_HZ,
                     MSG_HANDLED.load(Ordering::Relaxed),
                     STALLS.load(Ordering::Relaxed),
                     WORST_STALL_US.load(Ordering::Relaxed),
-                    PEAK_ITER_US.swap(0, Ordering::Relaxed),
                     MSG_DROPPED.load(Ordering::Relaxed),
                 );
             }
@@ -480,8 +454,8 @@ mod app {
 
         loop {
             // Iteration time in wire ticks: SysTick-driven, independent of
-            // both the RTC and DWT, and keeps counting through any stall
-            // (SysTick and the message ISR outprioritize the RTC vector).
+            // the RTC, and keeps counting through any stall (SysTick and the
+            // message ISR outprioritize the RTC vector).
             let t0_tick = ISR_FIRED.load(Ordering::Relaxed);
 
             // select_biased! { _ = rx.recv() => false, _ = delay(2s) => true }
@@ -510,8 +484,6 @@ mod app {
             }
             MSG_HANDLED.fetch_add(1, Ordering::Relaxed);
 
-            PEAK_ITER_US.fetch_max(dt_us, Ordering::Relaxed);
-
             if dt_ticks > STALL_THRESHOLD_TICKS {
                 STALLS.fetch_add(1, Ordering::Relaxed);
                 WORST_STALL_US.fetch_max(dt_us, Ordering::Relaxed);
@@ -523,8 +495,7 @@ mod app {
                 );
             }
 
-            // Priority-2 "parse/respond" work for this message. asm::delay
-            // is instruction-counted — no DWT dependence, always terminates.
+            // Priority-2 "parse/respond" work for this message.
             cortex_m::asm::delay(PROC_CYCLES);
         }
     }

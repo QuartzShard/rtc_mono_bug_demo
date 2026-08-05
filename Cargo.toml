@@ -14,8 +14,8 @@ rtic-sync = "1.4"
 rtt-target = "0.6.2"
 
 # Point at the fork to see bug fix in action
-[patch.crates-io]
-atsamd-hal = { path = "../atsamd/hal" }
+# [patch.crates-io]
+# atsamd-hal = { path = "../atsamd/hal" }
 
 [profile.dev]
 panic = "abort"
